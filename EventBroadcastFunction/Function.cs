@@ -4,14 +4,13 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Web;
 using Amazon.ApiGatewayManagementApi;
 using Amazon.ApiGatewayManagementApi.Model;
 using Amazon.DynamoDBv2;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.SNSEvents;
 using Amazon.Runtime;
 using LambdaSharp;
-using LambdaSharp.ApiGateway;
 
 namespace Demo.EventBus.EventBroadcastFunction {
 
@@ -70,8 +69,14 @@ namespace Demo.EventBus.EventBroadcastFunction {
                 return Success("Confirmed");
             }
 
+            // inspect SNS message
+            var snsMessage = LambdaSerializer.Deserialize<SNSEvent.SNSMessage>(request.Body);
+            if(snsMessage.Message == null) {
+                return BadRequest();
+            }
+
             // broadcast message for all matching filters
-            var messageBytes = Encoding.UTF8.GetBytes(request.Body);
+            var messageBytes = Encoding.UTF8.GetBytes(snsMessage.Message);
             var filters = await _dataTable.GetConnectionFiltersAsync(connectionId);
             if(filters.Any()) {
                 await Task.WhenAll(filters.Select(filter => {
