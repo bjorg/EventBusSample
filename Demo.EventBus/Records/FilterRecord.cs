@@ -24,6 +24,5 @@ namespace Demo.EventBus.Records {
         public string FilterId { get; set; }
         public string FilterExpression { get; set; }
         public string ConnectionId { get; set; }
-        public string SubscriptionArn { get; set; }
     }
 }

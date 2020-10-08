@@ -108,7 +108,7 @@ namespace Demo.EventBus {
                 record,
                 pk: FILTER_PREFIX + record.FilterId,
                 sk: INFO,
-                gs1pk: SUBSCRIPTION_PREFIX + record.SubscriptionArn,
+                gs1pk: CONNECTION_PREFIX + record.ConnectionId,
                 gs1sk: FILTER_PREFIX + record.FilterId,
                 config: null,
                 cancellationToken
@@ -118,8 +118,8 @@ namespace Demo.EventBus {
         #endregion
 
         #region Record Queries
-        public Task<IEnumerable<FilterRecord>> GetSubscriptionFiltersAsync(string subscriptionArn, CancellationToken cancellationToken = default)
-            => DoSearchAsync<FilterRecord>(_table.QueryGS1BeginsWith(SUBSCRIPTION_PREFIX + subscriptionArn, FILTER_PREFIX), cancellationToken);
+        public Task<IEnumerable<FilterRecord>> GetConnectionFiltersAsync(string connectionId, CancellationToken cancellationToken = default)
+            => DoSearchAsync<FilterRecord>(_table.QueryGS1BeginsWith(CONNECTION_PREFIX + connectionId, FILTER_PREFIX), cancellationToken);
 
         public Task DeleteAllFiltersAsync(IEnumerable<FilterRecord> records, CancellationToken cancellationToken = default)
             => DeleteItemsAsync(records.Select(record => (PK: FILTER_PREFIX + record.FilterId, SK: INFO)));

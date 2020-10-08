@@ -1,4 +1,7 @@
 using System;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using Amazon.DynamoDBv2;
 using Amazon.Lambda.APIGatewayEvents;
@@ -12,11 +15,18 @@ namespace Demo.EventBus.WebSocketListenerFunction {
 
     public sealed class Function : ALambdaApiGatewayFunction {
 
+        //--- Class Methods ---
+        private static string ComputeMD5Hash(string text) {
+            using(var md5 = MD5.Create()) {
+                return string.Concat(md5.ComputeHash(Encoding.UTF8.GetBytes(text)).Select(x => x.ToString("X2")));
+            }
+        }
+
         //--- Fields ---
         private IAmazonSimpleNotificationService _snsClient;
         private DataTable _dataTable;
         private string _eventTopicArn;
-        private string _broadcastFunctionArn;
+        private string _broadcastApiUrl;
 
         //--- Methods ---
         public override async Task InitializeAsync(LambdaConfig config) {
@@ -24,7 +34,7 @@ namespace Demo.EventBus.WebSocketListenerFunction {
             // read configuration settings
             var dataTableName = config.ReadDynamoDBTableName("DataTable");
             _eventTopicArn = config.ReadText("EventTopic");
-            _broadcastFunctionArn = config.ReadText("EventBroadcastFunction");
+            _broadcastApiUrl = config.ReadText("EventBroadcastApiUrl");
 
             // initialize AWS clients
             _snsClient = new AmazonSimpleNotificationServiceClient();
@@ -37,8 +47,9 @@ namespace Demo.EventBus.WebSocketListenerFunction {
 
             // subscribe websocket to SNS topic notifications
             var subscriptionArn = (await _snsClient.SubscribeAsync(new SubscribeRequest {
-                Protocol = "lambda",
-                Endpoint = _broadcastFunctionArn,
+                Protocol = "https",
+                Endpoint = $"{_broadcastApiUrl}/{request.RequestContext.ConnectionId}",
+                ReturnSubscriptionArn = true,
                 TopicArn = _eventTopicArn
             })).SubscriptionArn;
 
@@ -85,7 +96,7 @@ namespace Demo.EventBus.WebSocketListenerFunction {
                 Task.Run(async () => {
 
                     // fetch all filters associated with SNS topic subscription
-                    var filters = await _dataTable.GetSubscriptionFiltersAsync(connection.SubscriptionArn);
+                    var filters = await _dataTable.GetConnectionFiltersAsync(request.RequestContext.ConnectionId);
 
                     // delete filters
                     await _dataTable.DeleteAllFiltersAsync(filters);
@@ -113,8 +124,7 @@ namespace Demo.EventBus.WebSocketListenerFunction {
             await _dataTable.CreateOrUpdateFilterAsync(new FilterRecord {
                 FilterId = request.FilterId,
                 FilterExpression = request.Filter,
-                ConnectionId = connection.ConnectionId,
-                SubscriptionArn = connection.SubscriptionArn
+                ConnectionId = connection.ConnectionId
             });
         }
 

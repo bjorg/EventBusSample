@@ -23,7 +23,9 @@ Items:
         Invoke: UnsubscribeRequest
 
   - Resource: DataTable
-    Scope: all
+    Scope:
+      - WebSocketListenerFunction
+      - EventBroadcastFunction
     Type: AWS::DynamoDB::Table
     Allow: ReadWrite
     Properties:
@@ -61,12 +63,17 @@ Items:
             ProjectionType: ALL
 
   - Function: EventBroadcastFunction
-    Scope: WebSocketListenerFunction
     Memory: 256
     Timeout: 30
+    Properties:
+      Environment:
+        Variables:
+          DEBUG_LOGGING_ENABLED: true
 
   - Resource: EventTopic
-    Scope: WebSocketListenerFunction
+    Scope:
+      - WebSocketListenerFunction
+      - EventBroadcastFunction
     Type: AWS::SNS::Topic
     Allow:
       - sns:Subscribe
@@ -77,5 +84,17 @@ Items:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref EventBroadcastFunction
-      Principal: sns.amazonaws.com
-      SourceArn: !Ref EventTopic
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${EventBroadcastApi}/*/$default"
+
+  - Resource: EventBroadcastApi
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${Module::Id}-HttpApi"
+      Description: Event Broadcast HTTP API
+      ProtocolType: HTTP
+      Target: !GetAtt  EventBroadcastFunction.Arn
+
+  - Variable: EventBroadcastApiUrl
+    Scope: WebSocketListenerFunction
+    Value: !GetAtt EventBroadcastApi.ApiEndpoint

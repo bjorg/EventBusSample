@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -7,19 +8,27 @@ using System.Web;
 using Amazon.ApiGatewayManagementApi;
 using Amazon.ApiGatewayManagementApi.Model;
 using Amazon.DynamoDBv2;
+using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Runtime;
 using LambdaSharp;
-using LambdaSharp.SimpleNotificationService;
+using LambdaSharp.ApiGateway;
 
 namespace Demo.EventBus.EventBroadcastFunction {
 
-    public class Message { }
+    public sealed class TopicSubscriptionPayload {
 
-    public sealed class Function : ALambdaTopicFunction<Message> {
+        //--- Properties ---
+        public string Type { get; set; }
+        public string TopicArn { get; set; }
+        public string SubscribeURL { get; set; }
+    }
+
+    public sealed class Function : ALambdaFunction<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse> {
 
         //--- Fields ---
         private IAmazonApiGatewayManagementApi _amaClient;
         private DataTable _dataTable;
+        private string _eventTopicArn;
 
         //--- Methods ---
         public override async Task InitializeAsync(LambdaConfig config) {
@@ -27,6 +36,7 @@ namespace Demo.EventBus.EventBroadcastFunction {
             // read configuration settings
             var dataTableName = config.ReadDynamoDBTableName("DataTable");
             var webSocketUrl = config.ReadText("Module::WebSocket::Url");
+            _eventTopicArn = config.ReadText("EventTopic");
 
             // initialize AWS clients
             _amaClient = new AmazonApiGatewayManagementApiClient(new AmazonApiGatewayManagementApiConfig {
@@ -35,19 +45,62 @@ namespace Demo.EventBus.EventBroadcastFunction {
             _dataTable = new DataTable(dataTableName, new AmazonDynamoDBClient());
         }
 
-        public override async Task ProcessMessageAsync(Message message) {
-            LogInfo($"Message received from {CurrentRecord.UnsubscribeUrl}");
+        public override async Task<APIGatewayHttpApiV2ProxyResponse> ProcessMessageAsync(APIGatewayHttpApiV2ProxyRequest request) {
+            LogInfo($"Message received from {request.RawPath}");
+            if(
+                (request.RawPath.Length <= 1)
+                || !request.RawPath.StartsWith("/", StringComparison.Ordinal)
+                || (request.RequestContext.Http.Method != "POST")
+            ) {
+                return BadRequest();
+            }
+            var connectionId = request.RawPath.Substring(1);
 
-            var subscriptionArn = HttpUtility.ParseQueryString(CurrentRecord.UnsubscribeUrl).Get("SubscriptionArn");
-            var filters = await _dataTable.GetSubscriptionFiltersAsync(subscriptionArn);
+            // check if request is a for a subscription
+            var topicSubscription = LambdaSerializer.Deserialize<TopicSubscriptionPayload>(request.Body);
+            if(topicSubscription.Type == "SubscriptionConfirmation") {
 
-            var messageBytes = Encoding.UTF8.GetBytes(CurrentRecord.Message);
-            await Task.WhenAll(filters.Select(filter => {
+                // confirm it's for the expected topic ARN
+                if(topicSubscription.TopicArn != _eventTopicArn) {
+                    return BadRequest();
+                }
 
-                // TODO: only send message if the filter allows it
-                LogInfo($"sending message to connection '{filter.ConnectionId}' connections");
-                return SendMessageToConnection(messageBytes, filter.ConnectionId);
-            }));
+                // confirm subscription
+                await HttpClient.GetAsync(topicSubscription.SubscribeURL);
+                return Success("Confirmed");
+            }
+
+            // broadcast message for all matching filters
+            var messageBytes = Encoding.UTF8.GetBytes(request.Body);
+            var filters = await _dataTable.GetConnectionFiltersAsync(connectionId);
+            if(filters.Any()) {
+                await Task.WhenAll(filters.Select(filter => {
+
+                    // TODO: only send message if the filter allows it
+                    LogInfo($"sending message to connection '{connectionId}' connections");
+                    return SendMessageToConnection(messageBytes, connectionId);
+                }));
+            }
+            return Success("Ok");
+
+            // local functions
+            APIGatewayHttpApiV2ProxyResponse Success(string message)
+                => new APIGatewayHttpApiV2ProxyResponse {
+                    Body = message,
+                    Headers = new Dictionary<string, string> {
+                        ["Content-Type"] = "text/plain"
+                    },
+                    StatusCode = 200
+                };
+
+            APIGatewayHttpApiV2ProxyResponse BadRequest()
+                => new APIGatewayHttpApiV2ProxyResponse {
+                    Body = "Bad Request",
+                    Headers = new Dictionary<string, string> {
+                        ["Content-Type"] = "text/plain"
+                    },
+                    StatusCode = 400
+                };
         }
 
         private async Task SendMessageToConnection(byte[] messageBytes, string connectionId) {
