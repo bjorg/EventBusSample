@@ -118,6 +118,8 @@ namespace Demo.EventBus.EventBroadcastFunction {
                 return Success("Ok");
             }
 
+            // TODO: async invoke rule-match lambda
+
             // broadcast message to all matching rules
             var messageBytes = Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new EventAction {
                 Source = cloudWatchEvent.Source,
