@@ -33,8 +33,7 @@ namespace Demo.EventBus {
         //--- Constants ---
         private const string VALID_SYMBOLS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         private const string CONNECTION_PREFIX = "WS#";
-        private const string FILTER_PREFIX = "FILTER#";
-        private const string SUBSCRIPTION_PREFIX = "SUB#";
+        private const string RULE_PREFIX = "RULE#";
         private const string INFO = "INFO";
 
         //--- Class Fields ---
@@ -43,6 +42,15 @@ namespace Demo.EventBus {
         private readonly static PutItemOperationConfig CreateItemConfig = new PutItemOperationConfig {
             ConditionalExpression = new Expression {
                 ExpressionStatement = "attribute_not_exists(#PK)",
+                ExpressionAttributeNames = {
+                    ["#PK"] = "PK"
+                }
+            }
+        };
+
+        private readonly static PutItemOperationConfig UpdateItemConfig = new PutItemOperationConfig {
+            ConditionalExpression = new Expression {
+                ExpressionStatement = "attribute_exists(#PK)",
                 ExpressionAttributeNames = {
                     ["#PK"] = "PK"
                 }
@@ -92,9 +100,16 @@ namespace Demo.EventBus {
                 record,
                 pk: CONNECTION_PREFIX + record.ConnectionId,
                 sk: INFO,
-                gs1pk: SUBSCRIPTION_PREFIX + record.SubscriptionArn,
-                gs1sk: CONNECTION_PREFIX + record.ConnectionId,
                 CreateItemConfig,
+                cancellationToken
+            );
+
+        public Task UpdateConnectionAsync(ConnectionRecord record, CancellationToken cancellationToken = default)
+            => PutItemsAsync(
+                record,
+                pk: CONNECTION_PREFIX + record.ConnectionId,
+                sk: INFO,
+                UpdateItemConfig,
                 cancellationToken
             );
 
@@ -106,23 +121,21 @@ namespace Demo.EventBus {
         public Task CreateOrUpdateFilterAsync(FilterRecord record, CancellationToken cancellationToken = default)
             => PutItemsAsync(
                 record,
-                pk: FILTER_PREFIX + record.FilterId,
-                sk: INFO,
-                gs1pk: CONNECTION_PREFIX + record.ConnectionId,
-                gs1sk: FILTER_PREFIX + record.FilterId,
+                pk: CONNECTION_PREFIX + record.ConnectionId,
+                sk: RULE_PREFIX + record.Rule,
                 config: null,
                 cancellationToken
             );
-        public Task DeleteFilterAsync(string filterId, CancellationToken cancellationToken = default)
-            => _table.DeleteItemAsync(FILTER_PREFIX + filterId, INFO);
+        public Task DeleteFilterAsync(string connectionId, string filterId, CancellationToken cancellationToken = default)
+            => _table.DeleteItemAsync(CONNECTION_PREFIX + connectionId, RULE_PREFIX + filterId);
         #endregion
 
         #region Record Queries
         public Task<IEnumerable<FilterRecord>> GetConnectionFiltersAsync(string connectionId, CancellationToken cancellationToken = default)
-            => DoSearchAsync<FilterRecord>(_table.QueryGS1BeginsWith(CONNECTION_PREFIX + connectionId, FILTER_PREFIX), cancellationToken);
+            => DoSearchAsync<FilterRecord>(_table.QueryBeginsWith(CONNECTION_PREFIX + connectionId, RULE_PREFIX), cancellationToken);
 
         public Task DeleteAllFiltersAsync(IEnumerable<FilterRecord> records, CancellationToken cancellationToken = default)
-            => DeleteItemsAsync(records.Select(record => (PK: FILTER_PREFIX + record.FilterId, SK: INFO)));
+            => DeleteItemsAsync(records.Select(record => (PK: CONNECTION_PREFIX + record.ConnectionId, SK: RULE_PREFIX + record.Rule)));
         #endregion
 
         private Task PutItemsAsync<T>(T item, string pk, string sk, PutItemOperationConfig config, CancellationToken cancellationToken = default) {

@@ -10,7 +10,9 @@ using Amazon.DynamoDBv2;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.SNSEvents;
 using Amazon.Runtime;
+using Demo.EventBus.WebSocketListenerFunction.Actions;
 using LambdaSharp;
+using Newtonsoft.Json;
 
 namespace Demo.EventBus.EventBroadcastFunction {
 
@@ -22,12 +24,27 @@ namespace Demo.EventBus.EventBroadcastFunction {
         public string SubscribeURL { get; set; }
     }
 
+    public sealed class CloudWatchEventPayload {
+
+        //--- Properties ---
+
+        [JsonProperty("source")]
+        public string Source { get; set; }
+
+        [JsonProperty("detail-type")]
+        public string DetailType { get; set; }
+
+        [JsonProperty("resources")]
+        public List<string> Resources { get; set; }
+    }
+
     public sealed class Function : ALambdaFunction<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse> {
 
         //--- Fields ---
         private IAmazonApiGatewayManagementApi _amaClient;
         private DataTable _dataTable;
         private string _eventTopicArn;
+        private string _keepAliveRuleArn;
 
         //--- Methods ---
         public override async Task InitializeAsync(LambdaConfig config) {
@@ -36,6 +53,7 @@ namespace Demo.EventBus.EventBroadcastFunction {
             var dataTableName = config.ReadDynamoDBTableName("DataTable");
             var webSocketUrl = config.ReadText("Module::WebSocket::Url");
             _eventTopicArn = config.ReadText("EventTopic");
+//            _keepAliveRuleArn = config.ReadText("KeepAliveRuleArn");
 
             // initialize AWS clients
             _amaClient = new AmazonApiGatewayManagementApiClient(new AmazonApiGatewayManagementApiConfig {
@@ -46,37 +64,73 @@ namespace Demo.EventBus.EventBroadcastFunction {
 
         public override async Task<APIGatewayHttpApiV2ProxyResponse> ProcessMessageAsync(APIGatewayHttpApiV2ProxyRequest request) {
             LogInfo($"Message received from {request.RawPath}");
+
+            // validate request
             if(
                 (request.RawPath.Length <= 1)
                 || !request.RawPath.StartsWith("/", StringComparison.Ordinal)
                 || (request.RequestContext.Http.Method != "POST")
             ) {
+                LogInfo("Unsupported request");
                 return BadRequest();
             }
             var connectionId = request.RawPath.Substring(1);
 
-            // check if request is a for a subscription
+            // check if request is a subscription confirmation
             var topicSubscription = LambdaSerializer.Deserialize<TopicSubscriptionPayload>(request.Body);
             if(topicSubscription.Type == "SubscriptionConfirmation") {
 
                 // confirm it's for the expected topic ARN
                 if(topicSubscription.TopicArn != _eventTopicArn) {
+                    LogWarn("Wrong Topic ARN for subscription confirmation (Expected: {0}, Received: {1})", _eventTopicArn, topicSubscription.TopicArn);
                     return BadRequest();
                 }
 
                 // confirm subscription
                 await HttpClient.GetAsync(topicSubscription.SubscribeURL);
+
+                // send acknowledgment to websocket connection
+                await SendMessageToConnection(Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new WelcomeAction())), connectionId);
                 return Success("Confirmed");
             }
 
             // inspect SNS message
             var snsMessage = LambdaSerializer.Deserialize<SNSEvent.SNSMessage>(request.Body);
             if(snsMessage.Message == null) {
+                LogWarn("Invalid SNS message received: {0}", request.Body);
+                return BadRequest();
+            }
+            var cloudWatchEvent = LambdaSerializer.Deserialize<CloudWatchEventPayload>(snsMessage.Message);
+
+            // validate CloudWatch event
+            if(
+                (cloudWatchEvent.Source == null)
+                || (cloudWatchEvent.DetailType == null)
+                || (cloudWatchEvent.Resources == null)
+            ) {
+                LogInfo("Invalid CloudWatch event");
                 return BadRequest();
             }
 
+            // check if a keep-alive event was received
+            if(
+                (cloudWatchEvent.Source == "aws.events")
+                && (cloudWatchEvent.DetailType == "Scheduled Event")
+                && (cloudWatchEvent.Resources.Count == 1)
+//                && (cloudWatchEvent.Resources[0] == _keepAliveRuleArn)
+            ) {
+
+                // send keep-alive action to websocket connection
+                await SendMessageToConnection(new KeepAliveAction(), connectionId);
+                return Success("Ok");
+            }
+
             // broadcast message for all matching filters
-            var messageBytes = Encoding.UTF8.GetBytes(snsMessage.Message);
+            var messageBytes = Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new EventAction {
+                Source = cloudWatchEvent.Source,
+                Type = cloudWatchEvent.DetailType,
+                Event = snsMessage.Message
+            }));
             var filters = await _dataTable.GetConnectionFiltersAsync(connectionId);
             if(filters.Any()) {
                 await Task.WhenAll(filters.Select(filter => {
@@ -107,6 +161,9 @@ namespace Demo.EventBus.EventBroadcastFunction {
                     StatusCode = 400
                 };
         }
+
+        private Task SendMessageToConnection(AnAction action, string connectionId)
+            => SendMessageToConnection(Encoding.UTF8.GetBytes(LambdaSerializer.Serialize<object>(action)), connectionId);
 
         private async Task SendMessageToConnection(byte[] messageBytes, string connectionId) {
 

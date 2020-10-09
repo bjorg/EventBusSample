@@ -21,8 +21,8 @@ namespace Demo.EventBus.Records {
     public sealed class FilterRecord {
 
         //--- Properties ---
-        public string FilterId { get; set; }
-        public string FilterExpression { get; set; }
+        public string Rule { get; set; }
+        public string Pattern { get; set; }
         public string ConnectionId { get; set; }
     }
 }

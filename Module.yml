@@ -7,6 +7,7 @@ Pragmas:
 Items:
 
   - Function: WebSocketListenerFunction
+    Description: Lambda function listening on the WebSocket connection
     Memory: 256
     Timeout: 30
     Sources:
@@ -16,13 +17,17 @@ Items:
       - WebSocket: $disconnect
         Invoke: CloseConnection
 
-      - WebSocket: subscribe
-        Invoke: SubscribeRequest
+      - WebSocket: Hello
+        Invoke: Hello
 
-      - WebSocket: unsubscribe
-        Invoke: UnsubscribeRequest
+      - WebSocket: Subscribe
+        Invoke: Subscribe
+
+      - WebSocket: Unsubscribe
+        Invoke: Unsubscribe
 
   - Resource: DataTable
+    Description: DynamoDB table for storing webSocket connection information and CloudWatch event rules
     Scope:
       - WebSocketListenerFunction
       - EventBroadcastFunction
@@ -37,12 +42,6 @@ Items:
         - AttributeName: SK
           AttributeType: S
 
-        - AttributeName: GS1PK
-          AttributeType: S
-
-        - AttributeName: GS1SK
-          AttributeType: S
-
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
@@ -50,19 +49,8 @@ Items:
         - AttributeName: SK
           KeyType: RANGE
 
-      GlobalSecondaryIndexes:
-        - IndexName: GS1
-          KeySchema:
-            - AttributeName: GS1PK
-              KeyType: HASH
-
-            - AttributeName: GS1SK
-              KeyType: RANGE
-
-          Projection:
-            ProjectionType: ALL
-
   - Function: EventBroadcastFunction
+    Description: Lambda function for broadcasting CloudWatch events to a WebSocket connection
     Memory: 256
     Timeout: 30
     Properties:
@@ -71,6 +59,7 @@ Items:
           DEBUG_LOGGING_ENABLED: true
 
   - Resource: EventTopic
+    Description: SNS topic for fan-out invocation on all open WebSocket connections
     Scope:
       - WebSocketListenerFunction
       - EventBroadcastFunction
@@ -79,7 +68,33 @@ Items:
       - sns:Subscribe
       - sns:Unsubscribe
 
+  - Resource: KeepAliveRule
+    Description: CloudWatch schedule rule for regularly sending a keep-alive message on each open WebSocket connection
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      Targets:
+        - Id: EventTopic
+          Arn: !Ref EventTopic
+
+  - Resource: KeepAliveRulePolicy
+    Description: SNS topic policy to allow keep-alive schedule rule to invoke the event topic
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EventsPublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref EventTopic
+      Topics:
+        - !Ref EventTopic
+
   - Resource: EventBroadcastPermission
+    Description: Lambda permission to allow HTTP API to invoke broadcast function
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
@@ -88,13 +103,10 @@ Items:
       SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${EventBroadcastApi}/*/$default"
 
   - Resource: EventBroadcastApi
+    Description: HTTP API used for SNS topic subscriptions to broadcast across all open WebSocket connections
     Type: AWS::ApiGatewayV2::Api
     Properties:
       Name: !Sub "${Module::Id}-HttpApi"
       Description: Event Broadcast HTTP API
       ProtocolType: HTTP
       Target: !GetAtt  EventBroadcastFunction.Arn
-
-  - Variable: EventBroadcastApiUrl
-    Scope: WebSocketListenerFunction
-    Value: !GetAtt EventBroadcastApi.ApiEndpoint
