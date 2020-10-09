@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -44,14 +45,31 @@ namespace Demo.EventBus.WebSocketListenerFunction {
         }
 
         // [Route("$connect")]
-        public async Task OpenConnectionAsync(APIGatewayProxyRequest request) {
+        public async Task<APIGatewayProxyResponse> OpenConnectionAsync(APIGatewayProxyRequest request) {
             LogInfo($"Connected: {request.RequestContext.ConnectionId}");
+
+            // verify presence of application ID query parameter
+            string appId = null;
+            if(
+                !(request.QueryStringParameters?.TryGetValue("app", out appId) ?? false)
+                || !Guid.TryParse(appId, out _)
+            ) {
+
+                // reject connection request
+                return new APIGatewayProxyResponse {
+                    StatusCode = (int)HttpStatusCode.BadRequest
+                };
+            }
 
             // create new connection record
             await _dataTable.CreateConnectionAsync(new ConnectionRecord {
                 ConnectionId = request.RequestContext.ConnectionId,
+                ApplicationId = appId,
                 Bearer = request.RequestContext.Authorizer?.Claims
             });
+            return new APIGatewayProxyResponse {
+                StatusCode = (int)HttpStatusCode.OK
+            };
         }
 
         // [Route("$disconnect")]
@@ -69,8 +87,12 @@ namespace Demo.EventBus.WebSocketListenerFunction {
             await Task.WhenAll(new Task[] {
 
                 // unsubscribe from SNS topic notifications
-                _snsClient.UnsubscribeAsync(new UnsubscribeRequest {
-                    SubscriptionArn = connection.SubscriptionArn
+                Task.Run(async () => {
+                    if(connection.SubscriptionArn != null) {
+                        await _snsClient.UnsubscribeAsync(new UnsubscribeRequest {
+                            SubscriptionArn = connection.SubscriptionArn
+                        });
+                    }
                 }),
 
                 // delete all event rules for this websocket connection

@@ -6,6 +6,11 @@
 * [ ] Add JWT authorizer for WebSocket connection
 * [ ] Add "Send" action to send a CloudWatch event
 
+## Types of communication
+* Send message to a specific WebSocket
+* Send message to all WebSocket connections belonging a certain user
+* Send message to all WebSocket connections for the application
+
 ## Sample WebSocket Actions
 
 ### Announce client

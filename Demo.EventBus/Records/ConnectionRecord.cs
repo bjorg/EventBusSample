@@ -24,6 +24,7 @@ namespace Demo.EventBus.Records {
 
         //--- Properties ---
         public string ConnectionId { get; set; }
+        public string ApplicationId { get; set; }
         public string SubscriptionArn { get; set; }
         public Dictionary<string, string> Bearer { get; set; }
     }
