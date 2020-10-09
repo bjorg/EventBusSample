@@ -117,8 +117,8 @@ namespace Demo.EventBus {
             => _table.DeleteItemAsync(CONNECTION_PREFIX + connectionId, INFO);
         #endregion
 
-        #region Filter Record
-        public Task CreateOrUpdateFilterAsync(FilterRecord record, CancellationToken cancellationToken = default)
+        #region Rule Record
+        public Task CreateOrUpdateRuleAsync(RuleRecord record, CancellationToken cancellationToken = default)
             => PutItemsAsync(
                 record,
                 pk: CONNECTION_PREFIX + record.ConnectionId,
@@ -126,15 +126,15 @@ namespace Demo.EventBus {
                 config: null,
                 cancellationToken
             );
-        public Task DeleteFilterAsync(string connectionId, string filterId, CancellationToken cancellationToken = default)
-            => _table.DeleteItemAsync(CONNECTION_PREFIX + connectionId, RULE_PREFIX + filterId);
+        public Task DeleteRuleAsync(string connectionId, string ruleId, CancellationToken cancellationToken = default)
+            => _table.DeleteItemAsync(CONNECTION_PREFIX + connectionId, RULE_PREFIX + ruleId);
         #endregion
 
         #region Record Queries
-        public Task<IEnumerable<FilterRecord>> GetConnectionFiltersAsync(string connectionId, CancellationToken cancellationToken = default)
-            => DoSearchAsync<FilterRecord>(_table.QueryBeginsWith(CONNECTION_PREFIX + connectionId, RULE_PREFIX), cancellationToken);
+        public Task<IEnumerable<RuleRecord>> GetConnectionRulesAsync(string connectionId, CancellationToken cancellationToken = default)
+            => DoSearchAsync<RuleRecord>(_table.QueryBeginsWith(CONNECTION_PREFIX + connectionId, RULE_PREFIX), cancellationToken);
 
-        public Task DeleteAllFiltersAsync(IEnumerable<FilterRecord> records, CancellationToken cancellationToken = default)
+        public Task DeleteAllRulesAsync(IEnumerable<RuleRecord> records, CancellationToken cancellationToken = default)
             => DeleteItemsAsync(records.Select(record => (PK: CONNECTION_PREFIX + record.ConnectionId, SK: RULE_PREFIX + record.Rule)));
         #endregion
 

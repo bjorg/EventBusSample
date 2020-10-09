@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using Amazon.ApiGatewayManagementApi;
@@ -12,31 +13,8 @@ using Amazon.Lambda.SNSEvents;
 using Amazon.Runtime;
 using Demo.EventBus.WebSocketListenerFunction.Actions;
 using LambdaSharp;
-using Newtonsoft.Json;
 
 namespace Demo.EventBus.EventBroadcastFunction {
-
-    public sealed class TopicSubscriptionPayload {
-
-        //--- Properties ---
-        public string Type { get; set; }
-        public string TopicArn { get; set; }
-        public string SubscribeURL { get; set; }
-    }
-
-    public sealed class CloudWatchEventPayload {
-
-        //--- Properties ---
-
-        [JsonProperty("source")]
-        public string Source { get; set; }
-
-        [JsonProperty("detail-type")]
-        public string DetailType { get; set; }
-
-        [JsonProperty("resources")]
-        public List<string> Resources { get; set; }
-    }
 
     public sealed class Function : ALambdaFunction<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse> {
 
@@ -45,6 +23,7 @@ namespace Demo.EventBus.EventBroadcastFunction {
         private DataTable _dataTable;
         private string _eventTopicArn;
         private string _keepAliveRuleArn;
+        private string _httpApiToken;
 
         //--- Methods ---
         public override async Task InitializeAsync(LambdaConfig config) {
@@ -53,7 +32,8 @@ namespace Demo.EventBus.EventBroadcastFunction {
             var dataTableName = config.ReadDynamoDBTableName("DataTable");
             var webSocketUrl = config.ReadText("Module::WebSocket::Url");
             _eventTopicArn = config.ReadText("EventTopic");
-//            _keepAliveRuleArn = config.ReadText("KeepAliveRuleArn");
+            _keepAliveRuleArn = config.ReadText("KeepAliveRuleArn");
+            _httpApiToken = config.ReadText("HttpApiInvocationToken");
 
             // initialize AWS clients
             _amaClient = new AmazonApiGatewayManagementApiClient(new AmazonApiGatewayManagementApiConfig {
@@ -63,18 +43,31 @@ namespace Demo.EventBus.EventBroadcastFunction {
         }
 
         public override async Task<APIGatewayHttpApiV2ProxyResponse> ProcessMessageAsync(APIGatewayHttpApiV2ProxyRequest request) {
-            LogInfo($"Message received from {request.RawPath}");
+            LogInfo($"Message received at {request.RequestContext.Http.Method}:{request.RawPath}?{request.RawQueryString}");
 
-            // validate request
-            if(
-                (request.RawPath.Length <= 1)
-                || !request.RawPath.StartsWith("/", StringComparison.Ordinal)
-                || (request.RequestContext.Http.Method != "POST")
-            ) {
-                LogInfo("Unsupported request");
+            // validate invocation method
+            if(request.RequestContext.Http.Method != "POST") {
+                LogInfo("Unsupported request method {0}", request.RequestContext.Http.Method);
                 return BadRequest();
             }
-            var connectionId = request.RawPath.Substring(1);
+
+            // validate request token
+            if(
+                !request.QueryStringParameters.TryGetValue("token", out var token)
+                || (token != _httpApiToken)
+            ) {
+                LogInfo("Missing or invalid request token");
+                return BadRequest();
+            }
+
+            // validate request websocket
+            if(
+                !request.QueryStringParameters.TryGetValue("ws", out var connectionId)
+                || string.IsNullOrEmpty(connectionId)
+            ) {
+                LogInfo("Invalid websocket connection id");
+                return BadRequest();
+            }
 
             // check if request is a subscription confirmation
             var topicSubscription = LambdaSerializer.Deserialize<TopicSubscriptionPayload>(request.Body);
@@ -89,35 +82,35 @@ namespace Demo.EventBus.EventBroadcastFunction {
                 // confirm subscription
                 await HttpClient.GetAsync(topicSubscription.SubscribeURL);
 
-                // send acknowledgment to websocket connection
+                // send welcome action to websocket connection
                 await SendMessageToConnection(Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new WelcomeAction())), connectionId);
                 return Success("Confirmed");
             }
 
-            // inspect SNS message
+            // validate SNS message
             var snsMessage = LambdaSerializer.Deserialize<SNSEvent.SNSMessage>(request.Body);
             if(snsMessage.Message == null) {
                 LogWarn("Invalid SNS message received: {0}", request.Body);
                 return BadRequest();
             }
-            var cloudWatchEvent = LambdaSerializer.Deserialize<CloudWatchEventPayload>(snsMessage.Message);
 
             // validate CloudWatch event
+            var cloudWatchEvent = LambdaSerializer.Deserialize<CloudWatchEventPayload>(snsMessage.Message);
             if(
                 (cloudWatchEvent.Source == null)
                 || (cloudWatchEvent.DetailType == null)
                 || (cloudWatchEvent.Resources == null)
             ) {
-                LogInfo("Invalid CloudWatch event");
+                LogInfo("Invalid CloudWatch event received: {0}", snsMessage.Message);
                 return BadRequest();
             }
 
-            // check if a keep-alive event was received
+            // check if the keep-alive event was received
             if(
                 (cloudWatchEvent.Source == "aws.events")
                 && (cloudWatchEvent.DetailType == "Scheduled Event")
                 && (cloudWatchEvent.Resources.Count == 1)
-//                && (cloudWatchEvent.Resources[0] == _keepAliveRuleArn)
+                && (cloudWatchEvent.Resources[0] == _keepAliveRuleArn)
             ) {
 
                 // send keep-alive action to websocket connection
@@ -125,17 +118,17 @@ namespace Demo.EventBus.EventBroadcastFunction {
                 return Success("Ok");
             }
 
-            // broadcast message for all matching filters
+            // broadcast message to all matching rules
             var messageBytes = Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new EventAction {
                 Source = cloudWatchEvent.Source,
                 Type = cloudWatchEvent.DetailType,
                 Event = snsMessage.Message
             }));
-            var filters = await _dataTable.GetConnectionFiltersAsync(connectionId);
-            if(filters.Any()) {
-                await Task.WhenAll(filters.Select(filter => {
+            var rules = await _dataTable.GetConnectionRulesAsync(connectionId);
+            if(rules.Any()) {
+                await Task.WhenAll(rules.Select(rule => {
 
-                    // TODO: only send message if the filter allows it
+                    // TODO: only send message if the rule allows it
                     LogInfo($"sending message to connection '{connectionId}' connections");
                     return SendMessageToConnection(messageBytes, connectionId);
                 }));
@@ -149,7 +142,7 @@ namespace Demo.EventBus.EventBroadcastFunction {
                     Headers = new Dictionary<string, string> {
                         ["Content-Type"] = "text/plain"
                     },
-                    StatusCode = 200
+                    StatusCode = (int)HttpStatusCode.OK
                 };
 
             APIGatewayHttpApiV2ProxyResponse BadRequest()
@@ -158,7 +151,7 @@ namespace Demo.EventBus.EventBroadcastFunction {
                     Headers = new Dictionary<string, string> {
                         ["Content-Type"] = "text/plain"
                     },
-                    StatusCode = 400
+                    StatusCode = (int)HttpStatusCode.BadRequest
                 };
         }
 

@@ -77,6 +77,19 @@ Items:
         - Id: EventTopic
           Arn: !Ref EventTopic
 
+  - Variable: KeepAliveRuleArn
+    Description: ARN for CloudWatch schedule rule used to differentiate between keep-alive message and other scheduled events
+    Scope: EventBroadcastFunction
+    Value: !GetAtt KeepAliveRule.Arn
+
+  - Variable: HttpApiInvocationToken
+    Description: Token used to restrict invocations of the HTTP API
+    Scope:
+      - WebSocketListenerFunction
+      - EventBroadcastFunction
+    Value:
+      Fn::Base64: !Select [ 2, !Split [ "/", !Ref AWS::StackId ]]
+
   - Resource: KeepAliveRulePolicy
     Description: SNS topic policy to allow keep-alive schedule rule to invoke the event topic
     Type: AWS::SNS::TopicPolicy
@@ -110,3 +123,8 @@ Items:
       Description: Event Broadcast HTTP API
       ProtocolType: HTTP
       Target: !GetAtt  EventBroadcastFunction.Arn
+
+  - Variable: EventBroadcastApiUrl
+    Scope: WebSocketListenerFunction
+    Description: HTTP API endpoint for broadcasting events
+    Value: !Sub "${EventBroadcastApi.ApiEndpoint}/$default"

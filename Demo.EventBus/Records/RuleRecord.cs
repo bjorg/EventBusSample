@@ -1,4 +1,4 @@
-/*
+﻿/*
  * LambdaSharp (λ#)
  * Copyright (C) 2018-2020
  * lambdasharp.net
@@ -18,7 +18,7 @@
 
 namespace Demo.EventBus.Records {
 
-    public sealed class FilterRecord {
+    public sealed class RuleRecord {
 
         //--- Properties ---
         public string Rule { get; set; }

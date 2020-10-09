@@ -27,6 +27,7 @@ namespace Demo.EventBus.WebSocketListenerFunction {
         private DataTable _dataTable;
         private string _eventTopicArn;
         private string _broadcastApiUrl;
+        private string _httpApiToken;
 
         //--- Methods ---
         public override async Task InitializeAsync(LambdaConfig config) {
@@ -35,6 +36,7 @@ namespace Demo.EventBus.WebSocketListenerFunction {
             var dataTableName = config.ReadDynamoDBTableName("DataTable");
             _eventTopicArn = config.ReadText("EventTopic");
             _broadcastApiUrl = config.ReadText("EventBroadcastApiUrl");
+            _httpApiToken = config.ReadText("HttpApiInvocationToken");
 
             // initialize AWS clients
             _snsClient = new AmazonSimpleNotificationServiceClient();
@@ -44,6 +46,12 @@ namespace Demo.EventBus.WebSocketListenerFunction {
         // [Route("$connect")]
         public async Task OpenConnectionAsync(APIGatewayProxyRequest request) {
             LogInfo($"Connected: {request.RequestContext.ConnectionId}");
+
+            // create new connection record
+            await _dataTable.CreateConnectionAsync(new ConnectionRecord {
+                ConnectionId = request.RequestContext.ConnectionId,
+                Bearer = request.RequestContext.Authorizer?.Claims
+            });
         }
 
         // [Route("$disconnect")]
@@ -65,14 +73,14 @@ namespace Demo.EventBus.WebSocketListenerFunction {
                     SubscriptionArn = connection.SubscriptionArn
                 }),
 
-                // delete all SNS topic subscription filters for this websocket connection
+                // delete all event rules for this websocket connection
                 Task.Run(async () => {
 
-                    // fetch all filters associated with websocket connection
-                    var filters = await _dataTable.GetConnectionFiltersAsync(request.RequestContext.ConnectionId);
+                    // fetch all rules associated with websocket connection
+                    var rules = await _dataTable.GetConnectionRulesAsync(request.RequestContext.ConnectionId);
 
-                    // delete filters
-                    await _dataTable.DeleteAllFiltersAsync(filters);
+                    // delete rules
+                    await _dataTable.DeleteAllRulesAsync(rules);
                 }),
 
                 // delete websocket connection record
@@ -83,24 +91,25 @@ namespace Demo.EventBus.WebSocketListenerFunction {
         // [Route("Hello")]
         public async Task HelloAsync(HelloAction action) {
             var connectionId = CurrentRequest.RequestContext.ConnectionId;
-            LogInfo($"Init: {connectionId}");
+            LogInfo($"Hello: {connectionId}");
 
-            // create new connection record (fails if record already exists)
-            var connectionRecord = new ConnectionRecord {
-                ConnectionId = connectionId
-            };
-            await _dataTable.CreateConnectionAsync(connectionRecord);
+            // retrieve websocket connection record
+            var connection = await _dataTable.GetConnectionAsync(connectionId);
+            if(connection == null) {
+                LogInfo("Connection was removed");
+                return;
+            }
 
             // subscribe websocket to SNS topic notifications
-            connectionRecord.SubscriptionArn = (await _snsClient.SubscribeAsync(new SubscribeRequest {
+            connection.SubscriptionArn = (await _snsClient.SubscribeAsync(new SubscribeRequest {
                 Protocol = "https",
-                Endpoint = $"{_broadcastApiUrl}/{connectionId}",
+                Endpoint = $"{_broadcastApiUrl}?ws={connectionId}&token={_httpApiToken}",
                 ReturnSubscriptionArn = true,
                 TopicArn = _eventTopicArn
             })).SubscriptionArn;
 
             // update connection record
-            await _dataTable.UpdateConnectionAsync(connectionRecord);
+            await _dataTable.UpdateConnectionAsync(connection);
         }
 
         // [Route("Subscribe")]
@@ -109,9 +118,10 @@ namespace Demo.EventBus.WebSocketListenerFunction {
             LogInfo($"Subscribe request from: {connectionId}");
 
             // validate request
-            if(action.Rule == null) {
+            if(string.IsNullOrEmpty(action.Rule)) {
                 return new AcknowledgeAction {
-                    Status = "BadRequest"
+                    Status = "Error",
+                    Message = "Missing or invalid rule name"
                 };
             }
 
@@ -127,8 +137,8 @@ namespace Demo.EventBus.WebSocketListenerFunction {
                 };
             }
 
-            // create or update event filter
-            await _dataTable.CreateOrUpdateFilterAsync(new FilterRecord {
+            // create or update event rule
+            await _dataTable.CreateOrUpdateRuleAsync(new RuleRecord {
                 Rule = action.Rule,
                 Pattern = action.Pattern,
                 ConnectionId = connection.ConnectionId
@@ -145,8 +155,8 @@ namespace Demo.EventBus.WebSocketListenerFunction {
             LogInfo($"Unsubscribe request from: {connectionId}");
             if(action.Rule != null) {
 
-                // delete event filter
-                await _dataTable.DeleteFilterAsync(connectionId, action.Rule);
+                // delete event rule
+                await _dataTable.DeleteRuleAsync(connectionId, action.Rule);
             }
             return new AcknowledgeAction {
                 Rule = action.Rule,

@@ -16,6 +16,8 @@
  * limitations under the License.
  */
 
+using System.Collections.Generic;
+
 namespace Demo.EventBus.Records {
 
     public sealed class ConnectionRecord {
@@ -23,5 +25,6 @@ namespace Demo.EventBus.Records {
         //--- Properties ---
         public string ConnectionId { get; set; }
         public string SubscriptionArn { get; set; }
+        public Dictionary<string, string> Bearer { get; set; }
     }
 }
