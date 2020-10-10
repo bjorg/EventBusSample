@@ -155,7 +155,8 @@ namespace Demo.EventBus.WebSocketListenerFunction {
                 LogInfo("Connection was removed");
                 return new AcknowledgeAction {
                     Rule = action.Rule,
-                    Status = "Gone"
+                    Status = "Error",
+                    Message = "Connection gone"
                 };
             }
 
