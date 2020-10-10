@@ -83,7 +83,7 @@ namespace Demo.EventBus.EventBroadcastFunction {
                 await HttpClient.GetAsync(topicSubscription.SubscribeURL);
 
                 // send welcome action to websocket connection
-                await SendMessageToConnection(Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new WelcomeAction())), connectionId);
+                await SendMessageToConnection(new WelcomeAction(), connectionId);
                 return Success("Confirmed");
             }
 
@@ -120,20 +120,25 @@ namespace Demo.EventBus.EventBroadcastFunction {
 
             // TODO: async invoke rule-match lambda
 
-            // broadcast message to all matching rules
-            var messageBytes = Encoding.UTF8.GetBytes(LambdaSerializer.Serialize(new EventAction {
-                Source = cloudWatchEvent.Source,
-                Type = cloudWatchEvent.DetailType,
-                Event = snsMessage.Message
-            }));
+            // determine what rules are matching
             var rules = await _dataTable.GetConnectionRulesAsync(connectionId);
-            if(rules.Any()) {
-                await Task.WhenAll(rules.Select(rule => {
+            var matchedRules = rules
+                .Where(rule => {
 
-                    // TODO: only send message if the rule allows it
-                    LogInfo($"sending message to connection '{connectionId}' connections");
-                    return SendMessageToConnection(messageBytes, connectionId);
-                }));
+                    // TODO: check which rules, if any, apply to message
+                    return true;
+                }).Select(rule => rule.Rule)
+                .ToList();
+            if(matchedRules.Any()) {
+                await SendMessageToConnection(
+                    new EventAction {
+                        Rules = matchedRules,
+                        Source = cloudWatchEvent.Source,
+                        Type = cloudWatchEvent.DetailType,
+                        Event = snsMessage.Message
+                    },
+                    connectionId
+                );
             }
             return Success("Ok");
 

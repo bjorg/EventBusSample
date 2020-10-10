@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Demo.EventBus.WebSocketListenerFunction.Actions {
 
     public sealed class EventAction : AnAction {
@@ -6,6 +8,7 @@ namespace Demo.EventBus.WebSocketListenerFunction.Actions {
         public EventAction() => Action = "Event";
 
         //--- Properties ---
+        public List<string> Rules { get; set; }
         public string Source { get; set; }
         public string Type { get; set; }
         public string Event { get; set; }
