@@ -10,6 +10,10 @@ Items:
     Description: Lambda function listening on the WebSocket connection
     Memory: 256
     Timeout: 30
+    Properties:
+      Environment:
+        Variables:
+          DEBUG_LOGGING_ENABLED: true
     Sources:
       - WebSocket: $connect
         Invoke: OpenConnection
