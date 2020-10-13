@@ -25,6 +25,9 @@ namespace Demo.EventBus {
 
     public static class EventPatternMatcher {
 
+        //--- Class Fields ---
+        private static readonly JValue Null = JValue.CreateNull();
+
         //--- Class Methos ---
         private static bool IsTextToken(JToken token) => token.Type == JTokenType.String;
         private static bool IsBooleanToken(JToken token) => token.Type == JTokenType.Boolean;
@@ -74,7 +77,7 @@ namespace Demo.EventBus {
         }
 
         //--- Methods ---
-        public static bool IsPatternValid(JObject pattern) {
+        public static bool IsValid(JObject pattern) {
             if(!pattern.Properties().Any()) {
 
                 // pattern cannot be empty
@@ -85,6 +88,11 @@ namespace Demo.EventBus {
                 case JArray allowedValues:
 
                     // only allow literals and content-patterns
+                    if(!allowedValues.Any()) {
+
+                        // list cannot be empty
+                        return false;
+                    }
                     foreach(var allowedValue in allowedValues) {
                         switch(allowedValue) {
                         case JArray _:
@@ -102,7 +110,7 @@ namespace Demo.EventBus {
                     }
                     break;
                 case JObject nestedPattern:
-                    if(!IsPatternValid(nestedPattern)) {
+                    if(!IsValid(nestedPattern)) {
                         return false;
                     }
                     break;
@@ -226,46 +234,51 @@ namespace Demo.EventBus {
             }
         }
 
-        public static bool IsPatternMatch(JObject data, JObject pattern) {
+        public static bool IsMatch(JObject data, JObject pattern) {
 
             // TODO: fix for supporting { "exists": false } constraint
 
-            foreach(var kv in pattern) {
-                switch(kv.Value) {
+            foreach(var patternProperty in pattern) {
+                switch(patternProperty.Value) {
                 case JArray allowedValues:
 
                     // check key exists
-                    switch(data[kv.Key]) {
+                    switch(data[patternProperty.Key]) {
                     case JObject _:
 
                         // array can never match an object
                         return false;
                     case JArray array:
-                        if(!allowedValues.Any(value => IsContentMatch(value, allowedValues))) {
+                        if(!array.Any(value => allowedValues.Any(allowedValue => IsContentMatch(value, allowedValue)))) {
                             return false;
                         }
                         break;
                     case JValue value:
-                        if(!IsContentMatch(value, allowedValues)) {
+                        if(!allowedValues.Any(allowedValue => IsContentMatch(value, allowedValue))) {
+                            return false;
+                        }
+                        break;
+                    case null:
+                        if(!allowedValues.Any(allowedValue => IsContentMatch(Null, allowedValue))) {
                             return false;
                         }
                         break;
                     default:
-                        throw new ArgumentException($"unexpected pattern type: {data[kv.Key]?.GetType().FullName ?? "<null>"}");
+                        throw new ArgumentException($"unexpected pattern type: {data[patternProperty.Key]?.GetType().FullName ?? "<null>"}");
                     }
                     break;
                 case JObject nestedPattern:
 
                     // check key exists and matches pattern
                     if(
-                        !(data[kv.Key] is JObject nestedData)
-                        || !IsPatternMatch(nestedData, nestedPattern)
+                        !(data[patternProperty.Key] is JObject nestedData)
+                        || !IsMatch(nestedData, nestedPattern)
                     ) {
                         return false;
                     }
                     break;
                 default:
-                    throw new ArgumentException($"unexpected pattern type: {kv.Value?.GetType().FullName ?? "<null>"}");
+                    throw new ArgumentException($"unexpected pattern type: {patternProperty.Value?.GetType().FullName ?? "<null>"}");
                 }
             }
             return true;
@@ -280,7 +293,12 @@ namespace Demo.EventBus {
                 if(pattern is JValue literalPattern) {
 
                     // check for an exact match
-                    return dataValue.Value == literalPattern.Value;
+                    return (dataValue.Value == literalPattern.Value)
+                        || (
+                            (dataValue.Value != null)
+                            && (literalPattern.Value != null)
+                            && dataValue.Value.Equals(literalPattern.Value)
+                        );
                 } else if(pattern is JObject contentPattern) {
 
                     // check content-based filter operation
