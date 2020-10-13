@@ -244,10 +244,13 @@ namespace Demo.EventBus {
 
                     // check key exists
                     switch(data[patternProperty.Key]) {
-                    case JObject _:
+                    case JObject map:
 
                         // array can never match an object
-                        return false;
+                        if(!allowedValues.Any(allowedValue => IsContentMatch(map, allowedValue))) {
+                            return false;
+                        }
+                        break;
                     case JArray array:
                         if(!array.Any(value => allowedValues.Any(allowedValue => IsContentMatch(value, allowedValue)))) {
                             return false;
@@ -259,7 +262,7 @@ namespace Demo.EventBus {
                         }
                         break;
                     case null:
-                        if(!allowedValues.Any(allowedValue => IsContentMatch(Null, allowedValue))) {
+                        if(!allowedValues.Any(allowedValue => IsContentMatch(null, allowedValue))) {
                             return false;
                         }
                         break;
@@ -285,12 +288,10 @@ namespace Demo.EventBus {
 
             // local functions
             bool IsContentMatch(JToken data, JToken pattern) {
-
-                // data must be a literal value
-                if(!(data is JValue dataValue)) {
-                    return false;
-                }
                 if(pattern is JValue literalPattern) {
+                    if(!(data is JValue dataValue)) {
+                        return false;
+                    }
 
                     // check for an exact match
                     return (dataValue.Value == literalPattern.Value)
@@ -305,12 +306,12 @@ namespace Demo.EventBus {
                     var contentPatternOperation = contentPattern.Properties().Single();
                     switch(contentPatternOperation.Name) {
                     case "prefix":
-                        if(dataValue.Type != JTokenType.String) {
+                        if(!TryGetText(data, out var dataText)) {
                             return false;
                         }
 
                         // { "prefix": "TEXT" }
-                        return ((string)dataValue.Value).StartsWith((string)contentPatternOperation.Value, StringComparison.Ordinal);
+                        return dataText.StartsWith((string)contentPatternOperation.Value, StringComparison.Ordinal);
                     case "anything-but":
                         if(contentPatternOperation.Value is JArray disallowedValues) {
 
@@ -324,7 +325,7 @@ namespace Demo.EventBus {
                     case "numeric": {
 
                         // check if data is numeric
-                        if(!TryGetNumeric(dataValue, out var dataNumeric)) {
+                        if(!TryGetNumeric(data, out var dataNumeric)) {
                             return false;
                         }
                         var numericFilterValues = (JArray)contentPatternOperation.Value;
@@ -362,16 +363,18 @@ namespace Demo.EventBus {
                             };
                     }
                     case "cidr":
-                        if(dataValue.Type != JTokenType.String) {
+                        if(!TryGetText(data, out var dataIpAddress)) {
                             return false;
                         }
 
                         // { "cidr": "10.0.0.0/24" }
-                        return IsInCidrRange((string)dataValue.Value, (string)contentPatternOperation.Value);
+                        return IsInCidrRange(dataIpAddress, (string)contentPatternOperation.Value);
                     case "exists":
 
-                        // TODO: implement
-                        throw new NotImplementedException();
+                        // { "exists": BOOLEAN  }
+                        return ((bool)((JValue)contentPatternOperation.Value).Value)
+                            ? ((data as JValue) != null)
+                            : ((data as JValue) == null);
                     }
 
                     // unrecognized content filter
@@ -382,11 +385,15 @@ namespace Demo.EventBus {
             }
 
             bool IsInCidrRange(string ipValue, string cidrRange) {
-                var ipAndPrefix = cidrRange.Split('/');
-                var ipAddress = BitConverter.ToInt32(IPAddress.Parse(ipAndPrefix[0]).GetAddressBytes(), 0);
-                var cidrAddress = BitConverter.ToInt32(IPAddress.Parse(ipValue).GetAddressBytes(), 0);
-                var cidrPrefix = IPAddress.HostToNetworkOrder(-1 << (32 - int.Parse(ipAndPrefix[1])));
-                return ((ipAddress & cidrPrefix) == (cidrAddress & cidrPrefix));
+                try {
+                    var ipAndPrefix = cidrRange.Split('/');
+                    var ipAddress = BitConverter.ToInt32(IPAddress.Parse(ipAndPrefix[0]).GetAddressBytes(), 0);
+                    var cidrAddress = BitConverter.ToInt32(IPAddress.Parse(ipValue).GetAddressBytes(), 0);
+                    var cidrPrefix = IPAddress.HostToNetworkOrder(-1 << (32 - int.Parse(ipAndPrefix[1])));
+                    return ((ipAddress & cidrPrefix) == (cidrAddress & cidrPrefix));
+                } catch {
+                    return false;
+                }
             }
         }
     }

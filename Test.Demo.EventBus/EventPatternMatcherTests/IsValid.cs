@@ -233,7 +233,7 @@ namespace Test.Demo.EventBus.EventPatternMatcherTests {
         }
 
         [Fact]
-        public void Pattern_with_numeric_two_operand_is_valid() {
+        public void Pattern_with_numeric_one_operation_is_valid() {
 
             // arrange
             var pattern = JObject.Parse(@"{
@@ -248,7 +248,7 @@ namespace Test.Demo.EventBus.EventPatternMatcherTests {
         }
 
         [Fact]
-        public void Pattern_with_numeric_four_operand_is_valid() {
+        public void Pattern_with_numeric_two_operations_is_valid() {
 
             // arrange
             var pattern = JObject.Parse(@"{
