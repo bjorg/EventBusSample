@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Newtonsoft.Json;
 
-namespace Demo.EventBus.EventBroadcastFunction {
+namespace Demo.EventBus.BroadcastFunction {
 
     public sealed class CloudWatchEventPayload {
 

@@ -9,11 +9,11 @@ using Amazon.Lambda.APIGatewayEvents;
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
 using Demo.EventBus.Records;
-using Demo.EventBus.WebSocketListenerFunction.Actions;
+using Demo.EventBus.Actions;
 using LambdaSharp;
 using LambdaSharp.ApiGateway;
 
-namespace Demo.EventBus.WebSocketListenerFunction {
+namespace Demo.EventBus.ListenerFunction {
 
     public sealed class Function : ALambdaApiGatewayFunction {
 

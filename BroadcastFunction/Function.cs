@@ -11,10 +11,10 @@ using Amazon.DynamoDBv2;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.SNSEvents;
 using Amazon.Runtime;
-using Demo.EventBus.WebSocketListenerFunction.Actions;
+using Demo.EventBus.Actions;
 using LambdaSharp;
 
-namespace Demo.EventBus.EventBroadcastFunction {
+namespace Demo.EventBus.BroadcastFunction {
 
     public sealed class Function : ALambdaFunction<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse> {
 

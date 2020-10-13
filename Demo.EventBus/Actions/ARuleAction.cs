@@ -1,4 +1,4 @@
-﻿namespace Demo.EventBus.WebSocketListenerFunction.Actions {
+﻿namespace Demo.EventBus.Actions {
 
     public abstract class ARuleAction : AnAction {
 

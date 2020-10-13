@@ -6,7 +6,7 @@ Pragmas:
       Module::WebSocket.RouteSelectionExpression: $request.body.Action
 Items:
 
-  - Function: WebSocketListenerFunction
+  - Function: ListenerFunction
     Description: Lambda function listening on the WebSocket connection
     Memory: 256
     Timeout: 30
@@ -33,8 +33,8 @@ Items:
   - Resource: DataTable
     Description: DynamoDB table for storing webSocket connection information and CloudWatch event rules
     Scope:
-      - WebSocketListenerFunction
-      - EventBroadcastFunction
+      - ListenerFunction
+      - BroadcastFunction
     Type: AWS::DynamoDB::Table
     Allow: ReadWrite
     Properties:
@@ -53,7 +53,7 @@ Items:
         - AttributeName: SK
           KeyType: RANGE
 
-  - Function: EventBroadcastFunction
+  - Function: BroadcastFunction
     Description: Lambda function for broadcasting CloudWatch events to a WebSocket connection
     Memory: 256
     Timeout: 30
@@ -65,8 +65,8 @@ Items:
   - Resource: EventTopic
     Description: SNS topic for fan-out invocation on all open WebSocket connections
     Scope:
-      - WebSocketListenerFunction
-      - EventBroadcastFunction
+      - ListenerFunction
+      - BroadcastFunction
     Type: AWS::SNS::Topic
     Allow:
       - sns:Subscribe
@@ -83,14 +83,14 @@ Items:
 
   - Variable: KeepAliveRuleArn
     Description: ARN for CloudWatch schedule rule used to differentiate between keep-alive message and other scheduled events
-    Scope: EventBroadcastFunction
+    Scope: BroadcastFunction
     Value: !GetAtt KeepAliveRule.Arn
 
   - Variable: HttpApiInvocationToken
     Description: Token used to restrict invocations of the HTTP API
     Scope:
-      - WebSocketListenerFunction
-      - EventBroadcastFunction
+      - ListenerFunction
+      - BroadcastFunction
     Value:
       Fn::Base64: !Select [ 2, !Split [ "/", !Ref AWS::StackId ]]
 
@@ -115,7 +115,7 @@ Items:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref EventBroadcastFunction
+      FunctionName: !Ref BroadcastFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${EventBroadcastApi}/*/$default"
 
@@ -126,9 +126,9 @@ Items:
       Name: !Sub "${Module::Id}-HttpApi"
       Description: Event Broadcast HTTP API
       ProtocolType: HTTP
-      Target: !GetAtt  EventBroadcastFunction.Arn
+      Target: !GetAtt  BroadcastFunction.Arn
 
   - Variable: EventBroadcastApiUrl
-    Scope: WebSocketListenerFunction
+    Scope: ListenerFunction
     Description: HTTP API endpoint for broadcasting events
     Value: !Sub "${EventBroadcastApi.ApiEndpoint}/$default"

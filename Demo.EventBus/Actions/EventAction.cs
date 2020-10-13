@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Demo.EventBus.WebSocketListenerFunction.Actions {
+namespace Demo.EventBus.Actions {
 
     public sealed class EventAction : AnAction {
 
