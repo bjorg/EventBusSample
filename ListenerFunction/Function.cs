@@ -12,6 +12,7 @@ using Demo.EventBus.Records;
 using Demo.EventBus.Actions;
 using LambdaSharp;
 using LambdaSharp.ApiGateway;
+using Newtonsoft.Json.Linq;
 
 namespace Demo.EventBus.ListenerFunction {
 
@@ -147,8 +148,6 @@ namespace Demo.EventBus.ListenerFunction {
                 };
             }
 
-            // TODO: validate event pattern
-
             // retrieve websocket connection record
             var connection = await _dataTable.GetConnectionAsync(connectionId);
             if(connection == null) {
@@ -157,6 +156,22 @@ namespace Demo.EventBus.ListenerFunction {
                     Rule = action.Rule,
                     Status = "Error",
                     Message = "Connection gone"
+                };
+            }
+
+            // validate pattern
+            var validPattern = false;
+            try {
+                validPattern = EventPatternMatcher.IsValid(JObject.Parse(action.Pattern));
+            } catch {
+
+                // nothing to do
+            }
+            if(!validPattern) {
+                return new AcknowledgeAction {
+                    Rule = action.Rule,
+                    Status = "Error",
+                    Message = "Invalid pattern"
                 };
             }
 

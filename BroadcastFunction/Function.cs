@@ -13,6 +13,7 @@ using Amazon.Lambda.SNSEvents;
 using Amazon.Runtime;
 using Demo.EventBus.Actions;
 using LambdaSharp;
+using Newtonsoft.Json.Linq;
 
 namespace Demo.EventBus.BroadcastFunction {
 
@@ -118,15 +119,24 @@ namespace Demo.EventBus.BroadcastFunction {
                 return Success("Ok");
             }
 
-            // TODO: async invoke rule-match lambda
-
             // determine what rules are matching
+            JObject evt;
+            try {
+                evt = JObject.Parse(snsMessage.Message);
+            } catch(Exception e) {
+                LogError(e, "invalid message");
+                return BadRequest();
+            }
             var rules = await _dataTable.GetConnectionRulesAsync(connectionId);
             var matchedRules = rules
                 .Where(rule => {
-
-                    // TODO: check which rules, if any, apply to message
-                    return true;
+                    try {
+                        var pattern = JObject.Parse(rule.Pattern);
+                        return EventPatternMatcher.IsMatch(evt, pattern);
+                    } catch(Exception e) {
+                        LogError(e, "invalid event pattern: {0}", rule.Pattern);
+                        return false;
+                    }
                 }).Select(rule => rule.Rule)
                 .ToList();
             if(matchedRules.Any()) {
