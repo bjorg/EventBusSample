@@ -72,11 +72,43 @@ Items:
       - sns:Subscribe
       - sns:Unsubscribe
 
+  - Resource: EventTopicPolicy
+    Description: SNS topic policy to allow keep-alive schedule rule to invoke the event topic
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+    PolicyDocument:
+      Version: '2012-10-17'
+      Statement:
+        - Sid: EventsPublish
+          Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sns:Publish
+          Resource: !Ref EventTopic
+          # Condition:
+          #   ArnEquals:
+          #     aws:SourceArn: !GetAtt KeepAliveRule.Arn
+    Topics:
+      - !Ref EventTopic
+
   - Resource: KeepAliveRule
     Description: CloudWatch schedule rule for regularly sending a keep-alive message on each open WebSocket connection
     Type: AWS::Events::Rule
     Properties:
       ScheduleExpression: rate(1 minute)
+      Targets:
+        - Id: EventTopic
+          Arn: !Ref EventTopic
+
+  - Resource: EventForwarderRule
+    Description: CloudWatch rule for forwarding events in the current deployment tier from to the SNS topic
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - !Sub "Inbox:${Module::FullName}"
+        resources:
+          - !Sub "lambdasharp:tier:${Deployment::Tier}"
       Targets:
         - Id: EventTopic
           Arn: !Ref EventTopic
@@ -93,22 +125,6 @@ Items:
       - BroadcastFunction
     Value:
       Fn::Base64: !Select [ 2, !Split [ "/", !Ref AWS::StackId ]]
-
-  - Resource: KeepAliveRulePolicy
-    Description: SNS topic policy to allow keep-alive schedule rule to invoke the event topic
-    Type: AWS::SNS::TopicPolicy
-    Properties:
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: EventsPublish
-            Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sns:Publish
-            Resource: !Ref EventTopic
-      Topics:
-        - !Ref EventTopic
 
   - Resource: EventBroadcastPermission
     Description: Lambda permission to allow HTTP API to invoke broadcast function
